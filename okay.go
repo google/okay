@@ -21,6 +21,7 @@ package okay
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"time"
 )
@@ -35,18 +36,46 @@ type OK interface {
 	// Verify reports whether the given Context has a valid credential.  If the
 	// given context has invalid credentials.  ok must be false if either err is
 	// non-nil, but it is valid for ok to be false when err is nil.
-	Verify(context.Context) (ok bool, err error)
+	Verify(ctx context.Context) (ok bool, err error)
 
 	// Allows reports whether this OK gates access to a given asset represented
 	// by the argument, such as a file path.  If err is non-nil, ok must be
 	// false, but ok may be false while err is nil.
-	Allows(interface{}) (ok bool, err error)
+	Allows(resource interface{}) (ok bool, err error)
 }
+
+var Invalid = errors.New("OK not valid")
 
 // New returns an empty OK, which is always valid but allows nothing and
 // verifies nobody.
 func New() OK {
 	return nullOK{}
+}
+
+func check(ctx context.Context, resource interface{}, ok OK) (bool, error) {
+	if !ok.Valid() {
+		return false, Invalid
+	}
+	if k, err := ok.Verify(ctx); !k {
+		return false, err
+	}
+	return ok.Allows(resource)
+}
+
+// Check returns true if the given OKs are valid, verify the context, and allow
+// the resource.  It returns true if *any* of the passed OKs is valid.
+func Check(ctx context.Context, resource interface{}, ok ...OK) (bool, error) {
+	var e error
+	for _, ok := range ok {
+		v, err := check(ctx, resource, ok)
+		if v {
+			return true, nil
+		}
+		if err != nil && (e != nil || e == Invalid) {
+			e = err
+		}
+	}
+	return false, e
 }
 
 type nullOK struct{}
@@ -135,7 +164,7 @@ func (a *allowOK) Allows(i interface{}) (bool, error) {
 // function to return a non-nil error will have that error returned if no
 // function returns true.  It is valid for all functions to return (false,
 // nil).
-func Allow(ok OK, allow func(interface{}) (allowed bool, err error)) OK {
+func Allow(ok OK, allow func(resource interface{}) (allowed bool, err error)) OK {
 	return &allowOK{
 		OK: ok,
 		a:  allow,
@@ -153,7 +182,7 @@ func WithCancel(ok OK) (OK, CancelFunc) {
 }
 
 // WithContext returns an OK that will expire when the context is canceled.
-func WithContext(ctx context.Context, ok OK) OK {
+func WithContext(ok OK, ctx context.Context) OK {
 	return Validate(ok, func() bool { return ctx.Err() == nil })
 }
 

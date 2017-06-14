@@ -191,7 +191,7 @@ ok := okay.New()
 ok = okay.WithTimeout(ok, 24*time.Hour)
 ```
 
-or, for an OK that invalidates itself when a Context expires or is canceled:
+Or, for an OK that invalidates itself when a Context expires or is canceled:
 
 ```go
 ok := okay.New()
