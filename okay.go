@@ -29,9 +29,9 @@ type OK interface {
 	Allows(interface{}) (ok bool, err error)
 }
 
-// Base returns an empty OK, which is always valid but allows nothing and
+// New returns an empty OK, which is always valid but allows nothing and
 // verifies nobody.
-func Base() OK {
+func New() OK {
 	return nullOK{}
 }
 
@@ -41,14 +41,24 @@ func (nullOK) Valid() bool                          { return true }
 func (nullOK) Verify(context.Context) (bool, error) { return false, nil }
 func (nullOK) Allows(interface{}) (bool, error)     { return false, nil }
 
-type cancelOK struct {
+type validOK struct {
 	OK
-	c int32
+	v func() bool
 }
 
-func (c *cancelOK) Valid() bool {
-	i := atomic.LoadInt32(&c.c)
-	return i == 0 && c.OK.Valid()
+func (v *validOK) Valid() bool {
+	return v.v() && v.OK.Valid()
+}
+
+// WithValid returns a new OK that will call the given function every time
+// Valid() is called.  It is possible to attach many such functions by repeated
+// application of this function.  All such functions must return true for
+// Valid() to return true.
+func WithValid(ok OK, valid func() bool) OK {
+	return &validOK{
+		OK: ok,
+		v:  valid,
+	}
 }
 
 // CancelFunc immediately marks the associated OK invalid.  Calls after the
@@ -57,20 +67,8 @@ type CancelFunc func()
 
 // WithCancel returns an OK that will expire when CancelFunc is called.
 func WithCancel(ok OK) (OK, CancelFunc) {
-	c := &cancelOK{
-		OK: ok,
-	}
-	return c, func() { atomic.StoreInt32(&c.c, 1) }
-}
-
-type expiresOK struct {
-	OK
-	exp time.Time
-	now func() time.Time
-}
-
-func (e *expiresOK) Valid() bool {
-	return e.now().Before(e.exp) && e.OK.Valid()
+	var c int32
+	return WithValid(ok, func() bool { return atomic.LoadInt32(&c) == 0 }), func() { atomic.StoreInt32(&c, 1) }
 }
 
 // Stubbed for testing.
@@ -78,18 +76,15 @@ var timeFunc = time.Now
 
 // WithDeadline returns an OK that will expire once the deadline has passed.
 func WithDeadline(ok OK, deadline time.Time) OK {
-	return &expiresOK{
-		OK:  ok,
-		exp: deadline,
-		now: timeFunc,
-	}
+	return WithValid(ok, func() bool {
+		return timeFunc().Before(deadline)
+	})
 }
 
 // WithTimeout returns an OK that will expire after the given duration.
 func WithTimeout(ok OK, timeout time.Duration) OK {
-	return &expiresOK{
-		OK:  ok,
-		exp: timeFunc().Add(timeout),
-		now: timeFunc,
-	}
+	exp := timeFunc().Add(timeout)
+	return WithValid(ok, func() bool {
+		return timeFunc().Before(exp)
+	})
 }
