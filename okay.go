@@ -127,10 +127,9 @@ func (v *verifyOK) Verify(ctx context.Context) (bool, error) {
 // is called.  It is possible to attach multiple such functions by repeated
 // calls to this function.  Functions are called in reverse order.  The first
 // function to return valid=true will end the call chain and Valid() will
-// return (true, nil, nil).  The first function to return a non-nil // err will
-// have that error returned if no subsequent function returns true.
-// If *any* verify function returns true, Verify() will return (true, nil,
-// nil).
+// return (true, nil).  The first function to return a non-nil err will have
+// that error returned if no subsequent function returns true.  If *any* verify
+// function returns true, Verify() will return (true, nil).
 func Verify(ok OK, verify func(context.Context) (valid bool, err error)) OK {
 	return &verifyOK{
 		OK: ok,
